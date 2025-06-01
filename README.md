@@ -1,8 +1,8 @@
 # DrugLM: A Text-Driven Language Model Framework for Enhancing Drug-Target Interaction
 
-DrugLM is a unified framework that integrates Large Language Model (LLM)-derived embeddings into Drug-Target Interaction (DTI) prediction architectures. Our approach leverages rich textual descriptions of drugs and targets to generate semantic embeddings using multiple pre-trained language models.
+DrugLM is a unified framework that integrates Large Language Model (LLM)-derived embeddings into Drug-Target Interaction (DTI) prediction architectures. Our approach leverages rich textual descriptions of drugs and targets to generate embeddings using multiple pre-trained language models.
 
-This repository provides the complete implementation for generating language model embeddings and running downstream DTI prediction tasks. The codebase is organized into two main components: upstream embedding generation using three language models (BGE, E5, GTE) in both pretrained and fine-tuned configurations, and downstream DTI prediction using various neural network architectures.
+This repository provides the implementation for generating language model embeddings and running downstream DTI prediction tasks. The codebase is organized into two main components: upstream embedding generation using three language models (BGE, E5, GTE) in both pretrained and fine-tuned configurations, and downstream DTI predictions.
 
 ![DrugLM Framework](OVERVIEW.png)
 
