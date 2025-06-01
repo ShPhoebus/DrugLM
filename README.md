@@ -6,6 +6,30 @@ This repository provides the complete implementation for generating language mod
 
 ![DrugLM Framework](OVERVIEW.png)
 
+## Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/ShPhoebus/DrugLM.git
+cd DrugLM
+```
+
+### 2. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Download Data and Pre-trained Embeddings
+
+Before running any experiments, you need to download the required datasets and pre-trained language model embeddings:
+
+```bash
+python download_data_embeddings.py
+```
+
+
 ## Available Models
 
 - **BGE**: BAAI/bge-large-en-v1.5
@@ -57,10 +81,4 @@ python run_downstream_task.py deepconv --embedding-file bge_NonFT.pt --dim 1024 
 
 # GraphDTA-based DTI prediction
 python run_downstream_task.py graphdta --embedding-file bge_NonFT.pt --dim 1024 --epochs 100
-```
-
-## Requirements
-
-```bash
-pip install -r requirements.txt
 ```
