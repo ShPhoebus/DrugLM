@@ -21,7 +21,7 @@ cd DrugLM
 pip install -r requirements.txt
 ```
 
-### 3. Download Data and Pre-trained Embeddings
+### 3. Download Data and Pre-trained and finetuned Embeddings
 
 Before running any experiments, you need to download the required datasets, it also includes the trained LM embeddings (in the 'LM_finetun' folder), which can be directly used for training downstream tasks:
 
