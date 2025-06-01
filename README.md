@@ -1,4 +1,4 @@
-# DrugLM
+# DrugLM: A Text-Driven Language Model Framework for Enhancing Drug-Target Interaction
 
 ## Available Models
 
@@ -58,5 +58,3 @@ python run_downstream_task.py graphdta --embedding-file bge_NonFT.pt --dim 1024 
 ```bash
 pip install -r requirements.txt
 ```
-
-``` 
