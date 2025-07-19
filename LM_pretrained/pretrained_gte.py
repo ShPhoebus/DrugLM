@@ -45,6 +45,6 @@ torch.save({
     'target_embeddings': target_embeddings,
     'drug_ids': drug_ids,
     'target_ids': target_ids
-}, 'gte_noSMILES2SeqInChI_embeddings.pt')
+}, 'gte_pretrained_embedding.pt')
 
 print("Saved embeddings")
