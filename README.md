@@ -94,7 +94,9 @@ If you find this work useful, please cite our paper:
 @article{DrugLM2025,
   title={DrugLM: A Unified Framework to Enhance Drug-Target Interaction Predictions
          by Incorporating Textual Embeddings via Language Models},
-  author={...},
+  author={Tianyi Li and Zhengyu Fang and Xiaoge Zhang and Kaiyu Tang and Huiyuan Chen
+                  and Zhimeng Jiang and Tianxiang Zhao and Rong Xu and Feixiong Cheng
+                  and Xiao Li and Jing Li},
   journal={bioRxiv},
   year={2025},
   doi={10.1101/2025.07.09.657250}
