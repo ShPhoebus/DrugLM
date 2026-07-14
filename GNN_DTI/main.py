@@ -45,7 +45,12 @@ def get_feed_dict(train_entity_pairs, train_pos_set, start, end, n_negs=1):
 
 
 if __name__ == '__main__':
-    seed = 2020
+    global args, device
+    args = parse_args()
+
+    # Use seed from command line
+    seed = args.seed
+    print(f"Using seed: {seed}")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -53,10 +58,12 @@ if __name__ == '__main__':
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    global args, device
-    args = parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
     device = torch.device("cuda:0") if args.cuda else torch.device("cpu")
+
+    # Ensure output directory exists
+    if args.save and args.out_dir:
+        os.makedirs(args.out_dir, exist_ok=True)
 
     save_emb_epochs = []
     if args.save_emb_epochs:

@@ -255,7 +255,7 @@ def test(model, user_dict, n_params, mode='test', threshold=None):
                 print("[VALIDATION] Cannot create balanced set for threshold optimization. Using default threshold.")
 
         current_threshold = best_threshold_for_acc if mode == 'valid' else threshold
-        if current_threshold is None: 
+        if current_threshold is None:
              print("[WARNING] Threshold is None in test mode. Defaulting to 0.0 for ACC calculation.")
              current_threshold = 0.0
              

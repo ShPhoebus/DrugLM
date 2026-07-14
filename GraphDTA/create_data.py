@@ -5,7 +5,7 @@ import torch
 from rdkit import Chem
 import argparse
 from torch_geometric.data import Data
-from utils import TestbedDataset
+# from utils import TestbedDataset  # Not used
 
 def one_of_k_encoding_unk(x, allowable_set):
     if x not in allowable_set:

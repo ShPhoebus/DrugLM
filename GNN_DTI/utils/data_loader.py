@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import scipy.sparse as sp
 import torch
@@ -127,7 +128,19 @@ def load_data(model_args):
     args = model_args
     dataset = args.dataset
     directory = args.data_path + dataset + '/'
-    
+
+    # Check if using complete filtered data directory
+    if hasattr(args, 'filtered_data_dir') and args.filtered_data_dir and os.path.exists(args.filtered_data_dir):
+        filtered_dir = args.filtered_data_dir
+        print(f"Using filtered data directory: {filtered_dir}")
+        train_file = os.path.join(filtered_dir, 'train.txt')
+        valid_file = os.path.join(filtered_dir, 'valid.txt')
+        test_file = os.path.join(filtered_dir, 'test.txt')
+    else:
+        train_file = directory + 'train.txt'
+        valid_file = directory + 'valid.txt'
+        test_file = directory + 'test.txt'
+
     import json
     try:
         with open('id_mappings.json', 'r') as f:
@@ -139,13 +152,24 @@ def load_data(model_args):
         raise
 
     global n_users, n_items
-    n_users = len(drug_map)  # 7188
-    n_items = len(target_map)  # 4142
-    
-    train_cf = read_cf_amazon(directory + 'train.txt', drug_map, target_map)
-    test_cf = read_cf_amazon(directory + 'test.txt', drug_map, target_map)
-    valid_cf = read_cf_amazon(directory + 'valid.txt', drug_map, target_map)
- 
+    n_users = len(drug_map)  # 6673
+    n_items = len(target_map)  # 3890
+
+    train_cf = read_cf_amazon(train_file, drug_map, target_map)
+    valid_cf = read_cf_amazon(valid_file, drug_map, target_map)
+
+    # Support filtered test set
+    if hasattr(args, 'filtered_test') and args.filtered_test and os.path.exists(args.filtered_test):
+        test_cf = read_cf_amazon(args.filtered_test, drug_map, target_map)
+        print(f"Using filtered test set: {args.filtered_test}")
+        print(f"Filtered test samples: {len(test_cf)}")
+    else:
+        test_cf = read_cf_amazon(test_file, drug_map, target_map)
+        print(f"Test samples: {len(test_cf)}")
+
+    print(f"Train samples: {len(train_cf)}")
+    print(f"Valid samples: {len(valid_cf)}")
+
     for u, i in train_cf:
         train_user_set[u].append(i)
     for u, i in test_cf:
@@ -154,16 +178,16 @@ def load_data(model_args):
         valid_user_set[u].append(i)
 
     norm_mat = build_sparse_graph(train_cf)
-    
+
     n_params = {
         'n_users': int(n_users),
         'n_items': int(n_items),
-        'pretrain_drug_emb': None,  
+        'pretrain_drug_emb': None,
         'pretrain_target_emb': None,
         'drug_id_to_idx': {},
         'target_id_to_idx': {}
     }
-    
+
     user_dict = {
         'train_user_set': train_user_set,
         'valid_user_set': valid_user_set,

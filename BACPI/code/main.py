@@ -3,13 +3,13 @@ import sys
 import math
 import pickle
 import argparse
+import random
 import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 from model import BACPI
 from utils import *
-from utils import create_batches
 from data_process import training_data_process
 
 
@@ -19,6 +19,7 @@ args.add_argument('-dataset', type=str, default='human', help='choose a dataset'
 args.add_argument('-mode', type=str, default='gpu', help='gpu/cpu')
 args.add_argument('-cuda', type=str, default='0', help='visible cuda devices')
 args.add_argument('-verbose', type=int, default=1, help='0: do not output log in stdout, 1: output log')
+args.add_argument('-seed', type=int, default=2020, help='random seed')
 
 # Hyper-parameter
 args.add_argument('-lr', type=float, default=0.0005, help='init learning rate')
@@ -47,68 +48,124 @@ args.add_argument('-llm_model', type=str, default='bge_embeddings_step_78320epoc
 
 params, _ = args.parse_known_args()
 
-def train_eval(model, task, train_data, dev_data, test_data, device, params):
-    model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=params.lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=params.step_size, gamma=params.gamma)
 
-    if params.our_data:
-        embedding_data = torch.load(f'../data/interaction/our_data/real_data_raw/{params.llm_model}')
-        drug_dict = dict(zip(embedding_data['drug_ids'], embedding_data['drug_embeddings'].tolist()))
-        target_dict = dict(zip(embedding_data['target_ids'], embedding_data['target_embeddings'].tolist()))
+def set_seed(seed):
+    """Set random seed"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def train_eval(model, task, data_train, data_dev, data_test, device, params):
+    if task == 'affinity':
+        criterion = F.mse_loss
+        best_res = 2 ** 10
+    elif task == 'interaction':
+        criterion = F.cross_entropy
+        best_res = 0
     else:
-        drug_dict = target_dict = None
+        print("Please choose a correct mode!!!")
+        return 
+    
+    optimizer = optim.Adam(model.parameters(), lr=params.lr, weight_decay=0, amsgrad=True)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    idx = np.arange(len(data_train[0]))
+    batch_size = params.batch_size
+    if params.our_data:
+        embedding_data = torch.load(f'../data/interaction/our_data/{params.llm_model}')
+        drug_embeddings = embedding_data['drug_embeddings']
+        target_embeddings = embedding_data['target_embeddings']
+        drug_ids = embedding_data['drug_ids']
+        target_ids = embedding_data['target_ids']
+
+        drug_embedding_list = drug_embeddings.tolist()
+        drug_dict = dict(zip(drug_ids, drug_embedding_list))
+
+        target_embedding_list = target_embeddings.tolist()
+        target_dict = dict(zip(target_ids, target_embedding_list))
+
+    else:
+        drug_dict = None
+        target_dict = None
 
     for epoch in range(params.num_epochs):
+        print('epoch: {}'.format(epoch))
+        np.random.shuffle(idx)
         model.train()
-        total_loss = 0
-        train_batches = create_batches(train_data, params.batch_size)
-
-        for batch in train_batches:
-            atoms, atoms_mask, adjacencies, fps, amino, amino_mask, label, raw_protein_ids, raw_drug_ids = batch2tensor(batch, device, params.our_data)
-            pred = model(atoms, atoms_mask, adjacencies, amino, amino_mask, fps, params, device,
+        pred_labels = []
+        predictions = []
+        labels = []
+        for i in range(math.ceil(len(data_train[0]) / batch_size)):
+            batch_data = [data_train[di][idx[i * batch_size: (i + 1) * batch_size]] for di in range(len(data_train))]
+            atoms_pad, atoms_mask, adjacencies_pad, batch_fps, amino_pad, amino_mask, label, raw_protein_ids, raw_drug_ids \
+                = batch2tensor(batch_data, device, params.our_data)
+            pred = model(atoms_pad, atoms_mask, adjacencies_pad, amino_pad, amino_mask, batch_fps, params, device,
                          raw_protein_ids, raw_drug_ids, target_dict, drug_dict)
-            loss = F.cross_entropy(pred, label.long())
+            if task == 'affinity':
+                loss = criterion(pred.float(), label.float())
+                predictions += pred.cpu().detach().numpy().reshape(-1).tolist()
+                labels += label.cpu().numpy().reshape(-1).tolist()
+            elif task == 'interaction':
+                loss = criterion(pred.float(), label.view(label.shape[0]).long())
+                ys = F.softmax(pred, 1).to('cpu').data.numpy()
+                pred_labels += list(map(lambda x: np.argmax(x), ys))
+                predictions += list(map(lambda x: x[1], ys))
+                labels += label.cpu().numpy().reshape(-1).tolist()
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item()
+            if params.verbose:
+                sys.stdout.write('\repoch:{}, batch:{}/{}, loss:{}'.format(epoch, i, math.ceil(len(data_train[0])/batch_size)-1, float(loss.data)))
+                sys.stdout.flush()
+
+        if task == 'affinity':
+            print(' ')
+            predictions = np.array(predictions)
+            labels = np.array(labels)
+            rmse_train, pearson_train, spearman_train = regression_scores(labels, predictions)
+            print('Train rmse:{}, pearson:{}, spearman:{}'.format(rmse_train, pearson_train, spearman_train))
+
+            rmse_dev, pearson_dev, spearman_dev = test(model, task, data_dev, batch_size, device, params)
+            rmse_test, pearson_test, spearman_test = test(model, task, data_test, batch_size, device, params)
+            print('Dev rmse:{}, pearson:{}, spearman:{}'.format(rmse_dev, pearson_dev, spearman_dev))
+            print( 'Test rmse:{}, pearson:{}, spearman:{}'.format(rmse_test, pearson_test, spearman_test))
+
+            if rmse_dev < best_res:
+                best_res = rmse_dev
+                # torch.save(model, '../checkpoint/best_model_affinity.pth')
+                res = [rmse_test, pearson_test, spearman_test]
+        
+        else:
+            print(' ')
+            pred_labels = np.array(pred_labels)
+            predictions = np.array(predictions)
+            labels = np.array(labels)
+            auc_train, acc_train, apur_train = classification_scores(labels, predictions, pred_labels)
+            print('Train auc:{}, acc:{}, aupr:{}'.format(auc_train, acc_train, apur_train))
+
+
+            if params.our_data:
+                auc_dev, acc_dev, aupr_dev = test(model, task, data_dev, batch_size, device, params, target_dict, drug_dict)
+                auc_test, acc_test, aupr_test = test(model, task, data_test, batch_size, device, params, target_dict, drug_dict)
+            else:
+                auc_dev, acc_dev, aupr_dev = test(model, task, data_dev, batch_size, device, params)
+                auc_test, acc_test, aupr_test = test(model, task, data_test, batch_size, device, params)
+
+            print('Dev auc:{}, acc:{}, aupr:{}'.format(auc_dev, acc_dev, aupr_dev))
+            print('Test auc:{}, acc:{}, aupr:{}'.format(auc_test, acc_test, aupr_test))
+
+            if auc_dev > best_res:
+                best_res = auc_dev
+                # torch.save(model, '../checkpoint/best_model_interaction.pth')
+                res = [auc_test, acc_test, aupr_test]
 
         scheduler.step()
-        avg_loss = total_loss / len(train_batches)
-        # print(f"epoch {epoch}, avg loss: {avg_loss:.4f}")
-        scheduler.step()
-        avg_loss = total_loss / len(train_batches)
-        print(f"epoch {epoch}, avg loss: {avg_loss:.4f}", flush=True)
-
-    
-
-    print()
-    print("evaluating...")
-
-    model.eval()
-    pred_list = []
-    label_list = []
-
-    test_batches = create_batches(test_data, params.batch_size)
-    for batch in test_batches:
-        atoms, atoms_mask, adjacencies, fps, amino, amino_mask, label, raw_protein_ids, raw_drug_ids = batch2tensor(batch, device, params.our_data)
-        with torch.no_grad():
-            pred = model(atoms, atoms_mask, adjacencies, amino, amino_mask, fps, params, device,
-                         raw_protein_ids, raw_drug_ids, target_dict, drug_dict)
-        pred_prob = F.softmax(pred, dim=1).cpu().numpy()[:, 1]
-        pred_label = np.argmax(pred.cpu().numpy(), axis=1)
-        label = label.cpu().numpy()
-
-        pred_list += list(pred_prob)
-        label_list += list(label)
-
-    auc, acc, aupr = classification_scores(np.array(label_list), np.array(pred_list), np.array(pred_list) > 0.5)
-    print(f"Finally test result of auc: {auc}, acc: {acc}, aupr: {aupr}")
-
-    return auc, acc, aupr
+    return res
 
 
 def test(model, task, data_test, batch_size, device, params, target_dict=None, drug_dict=None):
@@ -143,7 +200,11 @@ def test(model, task, data_test, batch_size, device, params, target_dict=None, d
 
 
 if __name__ == '__main__':
-    
+
+    # Set random seed
+    set_seed(params.seed)
+    print(f"Random seed: {params.seed}")
+
     print(params)
     task = params.task
     dataset = params.dataset

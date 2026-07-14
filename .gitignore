@@ -1,0 +1,36 @@
+# Large embedding files (downloaded via download_data_embeddings.py)
+*.pt
+*.npy
+
+# HuggingFace cache
+.cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Experiment outputs
+results/
+*.log
+*_result_*.csv
+result_*.csv
+
+# Training artifacts
+*.h5
+*.ckpt
+
+# Generated/processed data directories
+BACPI/datasets/
+GNN_DTI/weights/
+GNN_DTI/data/drug/
+final_embeddings/
+MLP_DTI/final_embeddings/
+GraphDTA/data/processed/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -97,12 +97,8 @@ class BACPI(nn.Module):
         elif task == 'interaction':
             if params.our_data:
                 llm_model = params.llm_model
-                if 'bge' in llm_model:
-                    embedding_size = 1024
-                elif 'mpnet' in llm_model:
-                    embedding_size = 768
-                else:
-                    embedding_size = 1024
+                # All embeddings are 1024-dim: bge, e5, gte
+                embedding_size = 1024
                 self.output = nn.Linear((latent_dim + embedding_size) * (latent_dim * 2 + embedding_size), 2)
             else:
                 self.output = nn.Linear(latent_dim * latent_dim * 2, 2)

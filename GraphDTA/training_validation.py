@@ -6,11 +6,10 @@ from random import shuffle
 import torch
 import torch.nn as nn
 from torch_geometric.loader import DataLoader
-from sklearn.metrics import accuracy_score, roc_auc_score, f1_score
-from models.gat import GATNet
-from models.gat_gcn import GAT_GCN
-from models.gcn import GCNNet
+from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, average_precision_score
+# Only GINConvNet is available in this repository
 from models.ginconv import GINConvNet
+GATNet = GAT_GCN = GCNNet = GINConvNet  # Fallback to GIN for unavailable models
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train and validate GraphDTA model with LM embeddings for binary classification.')
@@ -143,9 +142,11 @@ def predicting_and_evaluating(model, device, loader):
         if len(np.unique(labels)) > 1:
             metrics['auc'] = roc_auc_score(labels, probs)
             metrics['f1'] = f1_score(labels, preds)
+            metrics['aupr'] = average_precision_score(labels, probs)
         else:
             metrics['auc'] = 0.5
             metrics['f1'] = f1_score(labels, preds, zero_division=0)
+            metrics['aupr'] = 0.0
 
     except Exception as e:
         print(f"Error calculating metrics: {e}")
@@ -168,7 +169,7 @@ for epoch in range(1, NUM_EPOCHS + 1):
 
     val_metrics, _, _ = predicting_and_evaluating(model, device, valid_loader)
     val_auc = val_metrics.get('auc', 0.0)
-    print(f"Val - Acc: {val_metrics.get('accuracy', 0.0):.4f}, AUC: {val_auc:.4f}, F1: {val_metrics.get('f1', 0.0):.4f}")
+    print(f"Val - Acc: {val_metrics.get('accuracy', 0.0):.4f}, AUC: {val_auc:.4f}, AUPR: {val_metrics.get('aupr', 0.0):.4f}, F1: {val_metrics.get('f1', 0.0):.4f}")
 
     scheduler.step(val_auc)
 
@@ -189,6 +190,7 @@ test_metrics, test_labels, test_probs = predicting_and_evaluating(model, device,
 print(f"\nTest Results:")
 print(f"  Accuracy: {test_metrics.get('accuracy', 0.0):.4f}")
 print(f"  AUC:      {test_metrics.get('auc', 0.0):.4f}")
+print(f"  AUPR:     {test_metrics.get('aupr', 0.0):.4f}")
 print(f"  F1 Score: {test_metrics.get('f1', 0.0):.4f}")
 
 results_df = pd.DataFrame({

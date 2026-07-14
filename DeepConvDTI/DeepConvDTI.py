@@ -1,3 +1,11 @@
+import os
+# Set TF GPU allocator BEFORE any TensorFlow imports
+os.environ.setdefault('TF_GPU_ALLOCATOR', 'cuda_malloc_async')
+# Ensure CUDA_VISIBLE_DEVICES is properly set for GPU access
+cvd = os.environ.get('CUDA_VISIBLE_DEVICES', '')
+if cvd == '':
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
 import numpy as np
 import pandas as pd
 
@@ -11,8 +19,16 @@ from keras.optimizers import Adam
 from keras.regularizers import l2,l1
 from keras.preprocessing import sequence
 
+# Enable GPU memory growth
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    try:
+        tf.config.experimental.set_memory_growth(physical_devices[0], True)
+    except:
+        pass
 
-from sklearn.metrics import precision_recall_curve, auc, roc_curve
+
+from sklearn.metrics import precision_recall_curve, auc, roc_curve, accuracy_score
 
 seq_rdic = ['A','I','L','V','F','W','Y','N','C','Q','M','S','T','D','E','R','H','K','G','P','O','U','X','B','Z']
 seq_dic = {w: i+1 for i,w in enumerate(seq_rdic)}
@@ -27,12 +43,18 @@ def encodeSeq(seq, seq_dic):
 def parse_data(dti_dir, drug_dir, protein_dir, with_label=True,
                prot_len=2500, prot_vec="Convolution",
                drug_vec="morgan_fp_r2", drug_len=2048,
-               lm_embedding_size=1024, drug_lm_file=None, protein_lm_file=None, embedding_file=None):  
+               lm_embedding_size=1024, drug_lm_file=None, protein_lm_file=None, embedding_file=None,
+               random_seed=42):
 
-    if embedding_file and os.path.exists(embedding_file):
+    use_lm_embedding = embedding_file and os.path.exists(embedding_file)
+
+    if use_lm_embedding:
         print(f"Using embedding file: {embedding_file}")
         drug_lm_file = embedding_file
         protein_lm_file = embedding_file
+    else:
+        np.random.seed(random_seed)
+        print(f"No embedding file provided, using RANDOM embeddings (seed={random_seed})")
 
     print(f"Parsing data: {dti_dir}")
 
@@ -128,9 +150,9 @@ def parse_data(dti_dir, drug_dir, protein_dir, with_label=True,
                 drug_lm_embeddings = np.zeros((len(drug_ids), lm_embedding_size), dtype=np.float32)
         except Exception as e:
             print(f"Error loading drug embeddings: {str(e)}")
-            drug_lm_embeddings = np.zeros((len(drug_ids), lm_embedding_size), dtype=np.float32)
+            drug_lm_embeddings = np.random.randn(len(drug_ids), lm_embedding_size).astype(np.float32)
     else:
-        drug_lm_embeddings = np.zeros((len(drug_ids), lm_embedding_size), dtype=np.float32)
+        drug_lm_embeddings = np.random.randn(len(drug_ids), lm_embedding_size).astype(np.float32)
     
     if protein_lm_file and os.path.exists(protein_lm_file):
         print(f"Loading protein embeddings from {protein_lm_file}")
@@ -171,9 +193,9 @@ def parse_data(dti_dir, drug_dir, protein_dir, with_label=True,
                 protein_lm_embeddings = np.zeros((len(protein_ids), lm_embedding_size), dtype=np.float32)
         except Exception as e:
             print(f"Error loading protein embeddings: {str(e)}")
-            protein_lm_embeddings = np.zeros((len(protein_ids), lm_embedding_size), dtype=np.float32)
+            protein_lm_embeddings = np.random.randn(len(protein_ids), lm_embedding_size).astype(np.float32)
     else:
-        protein_lm_embeddings = np.zeros((len(protein_ids), lm_embedding_size), dtype=np.float32)
+        protein_lm_embeddings = np.random.randn(len(protein_ids), lm_embedding_size).astype(np.float32)
     
     print(f"Data shapes - Drug: {drug_feature.shape}, Protein: {protein_feature.shape}, Drug LM: {drug_lm_embeddings.shape}, Protein LM: {protein_lm_embeddings.shape}")
     
@@ -291,9 +313,8 @@ class Drug_Target_Prediction(object):
                                      protein_layers=self.__protein_layers, drug_vec=self.__drug_vec,
                                      drug_len=self.__drug_len, lm_embedding_size=self.__lm_embedding_size)
 
-        opt = Adam(lr=learning_rate, decay=self.__decay)
+        opt = Adam(learning_rate=learning_rate)
         self.__model_t.compile(optimizer=opt, loss='binary_crossentropy', metrics=['accuracy'])
-        K.get_session().run(tf.global_variables_initializer())
 
     def fit(self, drug_feature, protein_feature, drug_lm_embedding, protein_lm_embedding, label, n_epoch=10, batch_size=32):
         for _ in range(n_epoch):
@@ -309,7 +330,7 @@ class Drug_Target_Prediction(object):
             param_tuple = pd.MultiIndex.from_tuples([("parameter", param) for param in ["window_sizes", "drug_layers", "fc_layers", "learning_rate"]])
             result_df = pd.DataFrame(data = [[self.__protein_strides, self.__drugs_layer, self.__fc_layers, self.__learning_rate]]*n_epoch, columns=param_tuple)
             result_df["epoch"] = range(1,n_epoch+1)
-        result_dic = {dataset: {"AUC":[], "AUPR": [], "opt_threshold(AUPR)":[], "opt_threshold(AUC)":[] }for dataset in kwargs}
+        result_dic = {dataset: {"AUC":[], "AUPR": [], "ACC": [], "opt_threshold(AUPR)":[], "opt_threshold(AUC)":[] }for dataset in kwargs}
 
         for _ in range(n_epoch):
             history = self.__model_t.fit([drug_feature,protein_feature, drug_lm_embedding, protein_lm_embedding],label,
@@ -326,22 +347,27 @@ class Drug_Target_Prediction(object):
                 AUC = auc(fpr, tpr)
                 precision, recall, thresholds = precision_recall_curve(test_label,prediction)
                 distance = (1-fpr)**2+(1-tpr)**2
-                EERs = (1-recall)/(1-precision)
+                EERs = (1-recall)/(1-precision + 1e-10)
                 positive = sum(test_label)
                 negative = test_label.shape[0]-positive
                 ratio = negative/positive
                 opt_t_AUC = thresholds_AUC[np.argmin(distance)]
                 opt_t_AUPR = thresholds[np.argmin(np.abs(EERs-ratio))]
                 AUPR = auc(recall,precision)
-                print(f"AUC: {AUC:.3f}, AUPR: {AUPR:.3f}, Optimal threshold (AUC): {opt_t_AUC:.3f}, Optimal threshold (AUPR): {opt_t_AUPR:.3f}")
+                # Calculate accuracy using optimal threshold from AUPR (more stable than AUC threshold)
+                pred_binary = (prediction >= opt_t_AUPR).astype(int).flatten()
+                ACC = accuracy_score(test_label, pred_binary)
+                print(f"AUC: {AUC:.3f}, AUPR: {AUPR:.3f}, ACC: {ACC:.3f}, Optimal threshold (AUC): {opt_t_AUC:.3f}, Optimal threshold (AUPR): {opt_t_AUPR:.3f}")
                 result_dic[dataset]["AUC"].append(AUC)
                 result_dic[dataset]["AUPR"].append(AUPR)
+                result_dic[dataset]["ACC"].append(ACC)
                 result_dic[dataset]["opt_threshold(AUC)"].append(opt_t_AUC)
                 result_dic[dataset]["opt_threshold(AUPR)"].append(opt_t_AUPR)
         if output_file:
             for dataset in kwargs:
                 result_df[dataset, "AUC"] = result_dic[dataset]["AUC"]
                 result_df[dataset, "AUPR"] = result_dic[dataset]["AUPR"]
+                result_df[dataset, "ACC"] = result_dic[dataset]["ACC"]
                 result_df[dataset, "opt_threshold(AUC)"] = result_dic[dataset]["opt_threshold(AUC)"]
                 result_df[dataset, "opt_threshold(AUPR)"] = result_dic[dataset]["opt_threshold(AUPR)"]
             print(f"Saving results to {output_file}")
@@ -362,6 +388,113 @@ class Drug_Target_Prediction(object):
     
     def save(self, output_file):
         self.__model_t.save(output_file)
+
+    def load(self, model_path):
+        """Load a pre-trained model"""
+        from keras.models import load_model
+        self.__model_t = load_model(model_path)
+        print(f"Model loaded from {model_path}")
+
+    def train_and_find_threshold(self, train_data, valid_data, n_epoch=10, batch_size=32):
+        """
+        Train model and find optimal threshold on validation set.
+        Returns: (optimal_threshold, best_epoch, best_aupr)
+        """
+        best_aupr = 0.0
+        best_threshold = 0.5
+        best_epoch = 0
+        best_weights = None
+
+        print("\n" + "="*60)
+        print("Training and finding optimal threshold on validation set")
+        print("="*60)
+
+        for epoch in range(1, n_epoch + 1):
+            # Train one epoch
+            history = self.__model_t.fit(
+                [train_data["drug_feature"], train_data["protein_feature"],
+                 train_data["drug_lm_embedding"], train_data["protein_lm_embedding"]],
+                train_data["label"],
+                epochs=epoch, batch_size=batch_size, shuffle=True,
+                verbose=1, initial_epoch=epoch-1
+            )
+
+            # Evaluate on validation set
+            prediction = self.__model_t.predict([
+                valid_data["drug_feature"], valid_data["protein_feature"],
+                valid_data["drug_lm_embedding"], valid_data["protein_lm_embedding"]
+            ], verbose=0)
+
+            fpr, tpr, thresholds_AUC = roc_curve(valid_data["label"], prediction)
+            precision, recall, thresholds = precision_recall_curve(valid_data["label"], prediction)
+            AUC = auc(fpr, tpr)
+            AUPR = auc(recall, precision)
+
+            # Calculate optimal threshold using EER method
+            distance = (1-fpr)**2 + (1-tpr)**2
+            EERs = (1-recall)/(1-precision + 1e-10)
+            positive = sum(valid_data["label"])
+            negative = len(valid_data["label"]) - positive
+            ratio = negative/positive if positive > 0 else 1.0
+            opt_t_AUPR = thresholds[np.argmin(np.abs(EERs-ratio))] if len(thresholds) > 0 else 0.5
+
+            print(f"Epoch {epoch}: Val AUC={AUC:.4f}, AUPR={AUPR:.4f}, threshold={opt_t_AUPR:.4f}")
+
+            # Track best model based on AUPR
+            if AUPR > best_aupr:
+                best_aupr = AUPR
+                best_threshold = opt_t_AUPR
+                best_epoch = epoch
+                best_weights = self.__model_t.get_weights()
+                print(f"  -> New best AUPR: {best_aupr:.4f}")
+
+        # Restore best weights
+        if best_weights is not None:
+            self.__model_t.set_weights(best_weights)
+
+        print("\n" + "="*60)
+        print(f"Best validation AUPR: {best_aupr:.4f} at epoch {best_epoch}")
+        print(f"Optimal threshold: {best_threshold:.4f}")
+        print("="*60)
+
+        return best_threshold, best_epoch, best_aupr
+
+    def evaluate_with_threshold(self, test_data, threshold, dataset_name="Test"):
+        """
+        Evaluate on test set using specified threshold.
+        Returns: dict with AUC, AUPR, ACC
+        """
+        prediction = self.__model_t.predict([
+            test_data["drug_feature"], test_data["protein_feature"],
+            test_data["drug_lm_embedding"], test_data["protein_lm_embedding"]
+        ], verbose=0)
+
+        fpr, tpr, _ = roc_curve(test_data["label"], prediction)
+        precision, recall, _ = precision_recall_curve(test_data["label"], prediction)
+
+        AUC = auc(fpr, tpr)
+        AUPR = auc(recall, precision)
+
+        # Calculate accuracy using threshold
+        pred_binary = (prediction >= threshold).astype(int).flatten()
+        ACC = accuracy_score(test_data["label"], pred_binary)
+
+        print("\n" + "="*60)
+        print(f"{dataset_name} Results (threshold={threshold:.4f})")
+        print("="*60)
+        print(f"AUC:  {AUC:.4f}")
+        print(f"AUPR: {AUPR:.4f}")
+        print(f"ACC:  {ACC:.4f}")
+        print("="*60)
+
+        return {
+            "AUC": AUC,
+            "AUPR": AUPR,
+            "ACC": ACC,
+            "threshold": threshold,
+            "prediction": prediction.flatten(),
+            "label": test_data["label"]
+        }
 
 
 if __name__ == '__main__':
@@ -392,21 +525,34 @@ if __name__ == '__main__':
     parser.add_argument("--prot-len", "-l", help="Protein vector length", default=2500, type=int)
     parser.add_argument("--drug-vec", "-V", help="Type of drug feature", type=str, default="morgan_fp_r2")
     parser.add_argument("--drug-len", "-L", help="Drug vector length", default=2048, type=int)
-    parser.add_argument("--lm-embedding-size", "-M", help="Size of LLM embedding", type=int, default=1024)  
+    parser.add_argument("--lm-embedding-size", "-M", help="Size of LLM embedding", type=int, default=1024)
     parser.add_argument("--drug-lm-file", dest="drug_lm_file", help="Path to LM embeddings for drugs (.pt file)", default=None)
     parser.add_argument("--protein-lm-file", dest="protein_lm_file", help="Path to LM embeddings for proteins (.pt file)", default=None)
-    parser.add_argument("--embedding-file", dest="embedding_file", help="Path to single .pt file containing both drug and protein embeddings", default=None)
+    parser.add_argument("--embedding-file", dest="embedding_file", help="Path to single .pt file containing both drug and protein embeddings (if not provided, uses random embeddings)", default=None)
+    parser.add_argument("--random-seed", help="Random seed for random embedding generation (used when no embedding file provided)", type=int, default=42)
     # the other hyper-parameters
     parser.add_argument("--activation", "-a", help='Activation function of model', type=str, default='elu')
     parser.add_argument("--dropout", "-D", help="Dropout ratio", default=0.2, type=float)
     parser.add_argument("--n-filters", "-F", help="Number of filters for convolution layer, only works for Convolution", default=64, type=int)
     parser.add_argument("--batch-size", "-b", help="Batch size", default=32, type=int)
     parser.add_argument("--decay", "-y", help="Learning rate decay", default=1e-4, type=float)
-    # mode_params
-    parser.add_argument("--validation", help="Excute validation with independent data, will give AUC and AUPR (No prediction result)", action="store_true", default=False)
-    parser.add_argument("--predict", help="Predict interactions of independent test set", action="store_true", default=False)
+    # === Validation set parameters ===
+    parser.add_argument("--valid-dti-dir", help="Validation DTI file path")
+    parser.add_argument("--valid-drug-dir", help="Validation drug information file path")
+    parser.add_argument("--valid-protein-dir", help="Validation protein information file path")
+
+    # === Run mode parameters (unified entry) ===
+    parser.add_argument("--train", help="Run training mode (train on train set, find threshold on validation set)", action="store_true", default=False)
+    parser.add_argument("--test", help="Run test mode (evaluate on test set, requires --load-model)", action="store_true", default=False)
+
+    # mode_params (kept for backward compatibility)
+    parser.add_argument("--validation", help="Legacy: Excute validation with independent data", action="store_true", default=False)
+    parser.add_argument("--predict", help="Legacy: Predict interactions of independent test set", action="store_true", default=False)
+
     # output_params
-    parser.add_argument("--save-model", "-m", help="save model", type=str)
+    parser.add_argument("--save-model", "-m", help="Path to save trained model", type=str)
+    parser.add_argument("--load-model", help="Path to load pre-trained model for testing", type=str)
+    parser.add_argument("--threshold", type=float, default=None, help="Classification threshold for test mode (if not specified, use validation set to determine)")
     parser.add_argument("--output", "-o", help="Prediction output", type=str)
 
     args = parser.parse_args()
@@ -467,9 +613,10 @@ if __name__ == '__main__':
         "drug_vec": args.drug_vec,
         "drug_len": args.drug_len,
         "lm_embedding_size": args.lm_embedding_size,
-        "drug_lm_file": args.drug_lm_file, 
+        "drug_lm_file": args.drug_lm_file,
         "protein_lm_file": args.protein_lm_file,
-        "embedding_file": args.embedding_file
+        "embedding_file": args.embedding_file,
+        "random_seed": args.random_seed
     }
     
     train_paths = {
@@ -554,11 +701,124 @@ if __name__ == '__main__':
 
         print("Starting validation")
         validation_params.update(valid_data)
-        dti_prediction_model.validation(train_data["drug_feature"], train_data["protein_feature"], 
-                                       train_data["drug_lm_embedding"], train_data["protein_lm_embedding"], 
+        dti_prediction_model.validation(train_data["drug_feature"], train_data["protein_feature"],
+                                       train_data["drug_lm_embedding"], train_data["protein_lm_embedding"],
                                        train_data["label"], **validation_params)
 
-    if args.save_model:
-        print(f"Saving model to {args.save_model}")
-        dti_prediction_model.save(args.save_model)
+        # Save model if requested (legacy mode)
+        if args.save_model:
+            print(f"Saving model to {args.save_model}")
+            dti_prediction_model.save(args.save_model)
+
+    # ========== New unified entry mode ==========
+    # Check whether to use new mode
+    use_new_mode = args.train or args.test or (args.valid_dti_dir is not None)
+
+    if use_new_mode:
+        dti_prediction_model = None
+        optimal_threshold = args.threshold
+
+        # === Training mode ===
+        if args.train or (args.valid_dti_dir is not None and args.load_model is None):
+            print("\n" + "="*60)
+            print("TRAIN MODE")
+            print("="*60)
+
+            # Check validation set parameters
+            if not (args.valid_dti_dir and args.valid_drug_dir and args.valid_protein_dir):
+                print("ERROR: Training mode requires validation set parameters:")
+                print("  --valid-dti-dir, --valid-drug-dir, --valid-protein-dir")
+                exit(1)
+
+            # Load validation set
+            valid_params = {
+                "dti_dir": args.valid_dti_dir,
+                "drug_dir": args.valid_drug_dir,
+                "protein_dir": args.valid_protein_dir,
+                "with_label": True
+            }
+            valid_params.update(type_params)
+            valid_data = parse_data(**valid_params)
+
+            # Create model and train
+            dti_prediction_model = Drug_Target_Prediction(**model_params)
+
+            # Train and find optimal threshold
+            optimal_threshold, best_epoch, best_aupr = dti_prediction_model.train_and_find_threshold(
+                train_dic, valid_data,
+                n_epoch=args.n_epoch,
+                batch_size=args.batch_size
+            )
+
+            # Save model
+            if args.save_model:
+                print(f"Saving model to {args.save_model}")
+                dti_prediction_model.save(args.save_model)
+
+                # Also save threshold info
+                threshold_file = args.save_model.replace('.h5', '_threshold.txt').replace('.model', '_threshold.txt')
+                with open(threshold_file, 'w') as f:
+                    f.write(f"threshold: {optimal_threshold}\n")
+                    f.write(f"best_epoch: {best_epoch}\n")
+                    f.write(f"best_aupr: {best_aupr}\n")
+                print(f"Threshold info saved to {threshold_file}")
+
+        # === Test mode ===
+        # Conditions: 1. user specifies --test; 2. user specifies --load-model and test set; 3. just finished training and has test set
+        if args.test or (args.test_dti_dir and args.load_model) or (test_sets and dti_prediction_model is not None):
+            print("\n" + "="*60)
+            print("TEST MODE")
+            print("="*60)
+
+            # Load model (if not created yet)
+            if dti_prediction_model is None:
+                if not args.load_model:
+                    print("ERROR: Test mode requires --load-model to specify pre-trained model")
+                    exit(1)
+                dti_prediction_model = Drug_Target_Prediction(**model_params)
+                dti_prediction_model.load(args.load_model)
+
+                # If threshold not specified, try to read from file
+                if optimal_threshold is None:
+                    threshold_file = args.load_model.replace('.h5', '_threshold.txt').replace('.model', '_threshold.txt')
+                    if os.path.exists(threshold_file):
+                        with open(threshold_file, 'r') as f:
+                            for line in f:
+                                if line.startswith('threshold:'):
+                                    optimal_threshold = float(line.split(':')[1].strip())
+                        print(f"Loaded threshold {optimal_threshold} from {threshold_file}")
+
+            if optimal_threshold is None:
+                print("ERROR: No threshold specified. Use --threshold or ensure threshold file exists")
+                exit(1)
+
+            # Evaluate on test set
+            if test_sets:
+                for test_name, test_dti, test_drug, test_protein in test_sets:
+                    test_params = {
+                        "dti_dir": test_dti,
+                        "drug_dir": test_drug,
+                        "protein_dir": test_protein,
+                        "with_label": True
+                    }
+                    test_params.update(type_params)
+                    test_data = parse_data(**test_params)
+
+                    test_results = dti_prediction_model.evaluate_with_threshold(
+                        test_data, optimal_threshold, dataset_name=f"Test Set ({test_name})"
+                    )
+
+                    # Save results
+                    if args.output:
+                        result_df = pd.DataFrame({
+                            'label': test_results['label'],
+                            'prediction': test_results['prediction'],
+                            'binary_prediction': (test_results['prediction'] >= optimal_threshold).astype(int)
+                        })
+                        result_file = args.output if len(test_sets) == 1 else args.output.replace('.csv', f'_{test_name}.csv')
+                        result_df.to_csv(result_file, index=False)
+                        print(f"Results saved to {result_file}")
+            else:
+                print("Warning: No test set specified")
+
     exit()

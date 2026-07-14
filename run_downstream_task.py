@@ -183,7 +183,7 @@ def run_deepconv_dti(args):
         print("Error: DeepConvDTI/DeepConvDTI.py not found")
         return False
 
-    model_file = "DeepConvDTI/model_filtered.model"
+    model_file = "DeepConvDTI/model_filtered.h5"
     validation_output = "DeepConvDTI/validation_filtered_output.csv"
     test_output = "DeepConvDTI/test_filtered_result.csv"
 

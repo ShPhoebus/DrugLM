@@ -126,10 +126,10 @@ def extract_input_data(input_path, output_path, radius, ngram, dataset, name):
         interactions.append(np.array([float(interaction)]))
 
     os.makedirs(output_path, exist_ok=True)
-    np.save(os.path.join(output_path, 'compounds'), compounds)
-    np.save(os.path.join(output_path, 'adjacencies'), adjacencies)
+    np.save(os.path.join(output_path, 'compounds'), np.array(compounds, dtype=object), allow_pickle=True)
+    np.save(os.path.join(output_path, 'adjacencies'), np.array(adjacencies, dtype=object), allow_pickle=True)
     np.save(os.path.join(output_path, 'fingerprint'), fps)
-    np.save(os.path.join(output_path, 'proteins'), proteins)
+    np.save(os.path.join(output_path, 'proteins'), np.array(proteins, dtype=object), allow_pickle=True)
     np.save(os.path.join(output_path, 'interactions'), interactions)
 
     if dataset == "our_data":

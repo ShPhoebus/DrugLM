@@ -1,6 +1,11 @@
+import os
+# Ensure CUDA_VISIBLE_DEVICES is properly set for GPU access
+cvd = os.environ.get('CUDA_VISIBLE_DEVICES', '')
+if cvd == '':
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
 import numpy as np
 import pandas as pd
-import os
 import argparse
 import tensorflow as tf
 from tensorflow.keras.models import Model, load_model, save_model
@@ -9,6 +14,13 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.regularizers import l2
 from sklearn.metrics import precision_recall_curve, auc, roc_curve, accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 import json
+import random
+
+# Set random seed (from environment variable)
+seed = int(os.environ.get('PYTHONHASHSEED', 2020))
+np.random.seed(seed)
+random.seed(seed)
+tf.random.set_seed(seed)
 
 def parse_data(dti_dir, drug_dir, protein_dir, with_label=True, lm_embedding_size=1024, embedding_file=None):  
     print(f"Parsing files {dti_dir}, {drug_dir}, {protein_dir}")
@@ -33,8 +45,9 @@ def parse_data(dti_dir, drug_dir, protein_dir, with_label=True, lm_embedding_siz
     drug_ids = dti_df[drug_col].tolist()
     protein_ids = dti_df[protein_col].tolist()
     
-    drug_lm_embeddings = np.zeros((len(drug_ids), lm_embedding_size), dtype=np.float32)
-    protein_lm_embeddings = np.zeros((len(protein_ids), lm_embedding_size), dtype=np.float32)
+    # Initialize with random vectors (seed-controlled)
+    drug_lm_embeddings = np.random.randn(len(drug_ids), lm_embedding_size).astype(np.float32)
+    protein_lm_embeddings = np.random.randn(len(protein_ids), lm_embedding_size).astype(np.float32)
     
     if embedding_file and os.path.exists(embedding_file):
         print(f"Loading embeddings from {embedding_file}")
@@ -107,9 +120,9 @@ def parse_data(dti_dir, drug_dir, protein_dir, with_label=True, lm_embedding_siz
         
         except Exception as e:
             print(f"Error loading embeddings: {str(e)}")
-            print("Using zero vectors as embeddings due to error")
+            print("Using random embeddings due to error")
     else:
-        print("No embedding file provided or file doesn't exist, using zero vectors as embeddings")
+        print("No embedding file provided or file doesn't exist, using random embeddings (seed-controlled)")
     
     print("\nSample drug embeddings:")
     for i in range(min(3, len(drug_ids))):
@@ -153,7 +166,7 @@ class MLP_DTI_Model:
         
         self.model = self._build_model()
         
-        optimizer = Adam(lr=learning_rate, decay=decay)
+        optimizer = Adam(learning_rate=learning_rate)
         self.model.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=['accuracy'])
         
     def _build_model(self):

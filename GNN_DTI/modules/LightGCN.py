@@ -83,34 +83,40 @@ class LightGCN(nn.Module):
         self.gcn = self._init_model()
 
     def _init_weight(self, data_config):
-    
-#       Random embedding
         initializer = nn.init.xavier_uniform_
-        self.user_embed = initializer(torch.empty(self.n_users, self.emb_size))
-        self.item_embed = initializer(torch.empty(self.n_items, self.emb_size))
-        
-        print(f"\nLoading LM embedding from: {self.embedding_file}")
-        lm_embeddings = torch.load(self.embedding_file)
 
-        
-        with open('id_mappings.json', 'r') as f:
-            id_mappings = json.load(f)
+        # Check if using Random baseline (no LM embeddings)
+        if self.embedding_file == "" or not self.embedding_file:
+            print("\nUsing Random initialization (no LM embeddings)")
+            self.user_embed = initializer(torch.empty(self.n_users, self.emb_size))
+            self.item_embed = initializer(torch.empty(self.n_items, self.emb_size))
+            print(f"Random embedding initialized:")
+        else:
+            print(f"\nLoading LM embedding from: {self.embedding_file}")
+            lm_embeddings = torch.load(self.embedding_file, map_location='cpu', weights_only=False)
 
-        self.user_embed = lm_embeddings['drug_embeddings']
-        self.item_embed = lm_embeddings['target_embeddings']
+            with open('id_mappings.json', 'r') as f:
+                id_mappings = json.load(f)
 
-        drug_embeddings = lm_embeddings['drug_embeddings'].to(self.device)
-        for orig_id, mapped_id in id_mappings['drug'].items():
-            orig_idx = lm_embeddings['drug_ids'].index(orig_id)
-            self.user_embed[int(mapped_id)] = drug_embeddings[orig_idx]
+            self.user_embed = torch.zeros((self.n_users, self.emb_size))
+            self.item_embed = torch.zeros((self.n_items, self.emb_size))
 
-        target_embeddings = lm_embeddings['target_embeddings'].to(self.device)
-        for orig_id, mapped_id in id_mappings['target'].items():
-            orig_idx = lm_embeddings['target_ids'].index(orig_id)
-            self.item_embed[int(mapped_id)] = target_embeddings[orig_idx]
+            drug_embeddings = lm_embeddings['drug_embeddings'].to(self.device)
+            for orig_id, mapped_id in id_mappings['drug'].items():
+                orig_idx = lm_embeddings['drug_ids'].index(orig_id)
+                self.user_embed[int(mapped_id)] = drug_embeddings[orig_idx]
+
+            target_embeddings = lm_embeddings['target_embeddings'].to(self.device)
+            for orig_id, mapped_id in id_mappings['target'].items():
+                orig_idx = lm_embeddings['target_ids'].index(orig_id)
+                self.item_embed[int(mapped_id)] = target_embeddings[orig_idx]
+            print(f"Completed LM embedding mapping:")
 
         self.user_embed = F.normalize(self.user_embed, p=2, dim=1)
         self.item_embed = F.normalize(self.item_embed, p=2, dim=1)
+
+        print(f"Drug embedding shape: {self.user_embed.shape}")
+        print(f"Target embedding shape: {self.item_embed.shape}")
 
         self.sparse_norm_adj = self._convert_sp_mat_to_sp_tensor(self.adj_mat).to(self.device)
         

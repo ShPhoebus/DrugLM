@@ -37,41 +37,42 @@ class NGCF(nn.Module):
         # xavier init
         initializer = nn.init.xavier_uniform_
 
-#         embedding_dict = nn.ParameterDict({
-#             'user_emb': nn.Parameter(initializer(torch.empty(self.n_users,
-#                                                  self.emb_size))),
-#             'item_emb': nn.Parameter(initializer(torch.empty(self.n_items,
-#                                                  self.emb_size)))
-#         })
-        
-        print(f"\nLoading LM embedding from: {self.embedding_file}")
-        lm_embeddings = torch.load(self.embedding_file)
-
-        with open('id_mappings.json', 'r') as f:
-            id_mappings = json.load(f)
-
         embedding_dict = nn.ParameterDict()
 
-        user_emb = torch.zeros((self.n_users, self.emb_size)).to(self.device)
-        item_emb = torch.zeros((self.n_items, self.emb_size)).to(self.device)
-        
-        drug_embeddings = lm_embeddings['drug_embeddings'].to(self.device)
-        for orig_id, mapped_id in id_mappings['drug'].items():
-            orig_idx = lm_embeddings['drug_ids'].index(orig_id)
-            user_emb[int(mapped_id)] = drug_embeddings[orig_idx]
-        
-        target_embeddings = lm_embeddings['target_embeddings'].to(self.device)
-        for orig_id, mapped_id in id_mappings['target'].items():
-            orig_idx = lm_embeddings['target_ids'].index(orig_id)
-            item_emb[int(mapped_id)] = target_embeddings[orig_idx]
-        
+        # Check if using Random baseline (no LM embeddings)
+        if self.embedding_file == "" or not self.embedding_file:
+            print("\nUsing Random initialization (no LM embeddings)")
+            user_emb = initializer(torch.empty(self.n_users, self.emb_size)).to(self.device)
+            item_emb = initializer(torch.empty(self.n_items, self.emb_size)).to(self.device)
+            print(f"Random embedding initialized:")
+        else:
+            print(f"\nLoading LM embedding from: {self.embedding_file}")
+            # Load on CPU, then move to target device
+            lm_embeddings = torch.load(self.embedding_file, map_location='cpu', weights_only=False)
+
+            with open('id_mappings.json', 'r') as f:
+                id_mappings = json.load(f)
+
+            user_emb = torch.zeros((self.n_users, self.emb_size)).to(self.device)
+            item_emb = torch.zeros((self.n_items, self.emb_size)).to(self.device)
+
+            drug_embeddings = lm_embeddings['drug_embeddings'].to(self.device)
+            for orig_id, mapped_id in id_mappings['drug'].items():
+                orig_idx = lm_embeddings['drug_ids'].index(orig_id)
+                user_emb[int(mapped_id)] = drug_embeddings[orig_idx]
+
+            target_embeddings = lm_embeddings['target_embeddings'].to(self.device)
+            for orig_id, mapped_id in id_mappings['target'].items():
+                orig_idx = lm_embeddings['target_ids'].index(orig_id)
+                item_emb[int(mapped_id)] = target_embeddings[orig_idx]
+            print(f"Completed LM embedding mapping:")
+
         user_emb = F.normalize(user_emb, p=2, dim=1)
         item_emb = F.normalize(item_emb, p=2, dim=1)
-        
+
         embedding_dict['user_emb'] = nn.Parameter(user_emb)
         embedding_dict['item_emb'] = nn.Parameter(item_emb)
-        
-        print(f"Completed embedding mapping:")
+
         print(f"Drug embedding shape: {user_emb.shape}")
         print(f"Target embedding shape: {item_emb.shape}")
 

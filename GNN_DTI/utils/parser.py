@@ -18,8 +18,12 @@ def parse_args():
         help="Whether to use pretrained embeddings"
     )
     parser.add_argument(
-        "--embedding-file", type=str, required=True,
-        help="Path to LM embedding file (.pt). This parameter is required."
+        "--no-lm", action="store_true", default=False,
+        help="Use random initialization instead of LM embeddings (Random baseline)"
+    )
+    parser.add_argument(
+        "--embedding-file", type=str, default="",
+        help="Path to LM embedding file (.pt). Not required if --no-lm is set."
     )
 
     parser.add_argument("--gnn", nargs="?", default="lightgcn",
@@ -42,6 +46,8 @@ def parse_args():
     parser.add_argument("--n_negs", type=int, default=64, help="number of candidate negative")
     parser.add_argument("--pool", type=str, default='concat', help="[concat, mean, sum, final]")
 
+    parser.add_argument("--seed", type=int, default=2020, help="random seed for reproducibility")
+
     parser.add_argument("--cuda", type=bool, default=True, help="use gpu or not")
     parser.add_argument("--gpu_id", type=int, default=2, help="gpu id")
 #     parser.add_argument('--Ks', nargs='?', default='[1, 5, 10, 20, 40, 60]',
@@ -62,8 +68,18 @@ def parse_args():
     )
     
     parser.add_argument(
-        "--save_emb_epochs", type=str, default="", 
+        "--save_emb_epochs", type=str, default="",
         help="Specify epochs to save embeddings, separated by commas, e.g. '10,20,30'"
+    )
+
+    parser.add_argument(
+        "--filtered-test", type=str, default="",
+        help="Path to filtered test set (without leakage). If empty, use original test set."
+    )
+
+    parser.add_argument(
+        "--filtered-data-dir", type=str, default="",
+        help="Directory containing filtered train.txt, valid.txt, test.txt. If set, overrides data_path for all datasets."
     )
 
     return parser.parse_args()

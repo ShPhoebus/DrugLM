@@ -6,10 +6,6 @@ from scipy import stats
 from sklearn import metrics
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curve
 
-def create_batches(data, batch_size):
-    num = len(data[0])
-    return [[d[i * batch_size: (i + 1) * batch_size] for d in data] for i in range((num + batch_size - 1) // batch_size)]
-
 
 def batch_pad(arr):
     N = max([a.shape[0] for a in arr])
@@ -60,7 +56,7 @@ def batch2tensor(batch_data, device, our_data):
     if our_data:
         raw_protein_ids = torch.IntTensor(raw_protein_ids).to(device)
         raw_drug_ids = torch.IntTensor(raw_drug_ids).to(device)
-    label = torch.FloatTensor(batch_data[4]).view(-1).to(device)
+    label = torch.FloatTensor(batch_data[4]).to(device)
 
     return atoms_pad, atoms_mask, adjacencies_pad, fps, amino_pad, amino_mask, label, raw_protein_ids, raw_drug_ids
 
